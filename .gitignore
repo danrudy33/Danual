@@ -1,0 +1,6 @@
+output/manifest.json
+output/.manifest_snapshot.json
+references/
+templates/
+__pycache__/
+*.pyc

@@ -1,0 +1,4 @@
+name: danual-rebuild
+description: "Rebuild The Danual after gateway startup (catches post-update changes)"
+events:
+  - gateway:startup
