@@ -16,8 +16,26 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 HERMES_AGENT="$HERMES_HOME/hermes-agent"
 VENV_PYTHON="$HERMES_AGENT/venv/bin/python3"
 SYSTEM_PYTHON="$(command -v python3)"
-MANIFEST="$SCRIPT_DIR/../output/manifest.json"
+OUTPUT_DIR="$SCRIPT_DIR/../output"
+MANIFEST="$OUTPUT_DIR/manifest.json"
 MANUAL="$HERMES_HOME/docs/Hermes_Manual.html"
+LOCKDIR="$OUTPUT_DIR/.rebuild.lock"
+
+# Portable advisory lock: mkdir is atomic on POSIX filesystems.
+# If another rebuild is in progress, exit quietly — both scheduled rebuilds are
+# fire-and-forget, so skipping is safer than racing the shared manifest file.
+mkdir -p "$OUTPUT_DIR"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    # Stale lock? Remove if older than 10 min (pipeline is ~5s, so anything older is orphaned).
+    if find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null | grep -q .; then
+        rmdir "$LOCKDIR" 2>/dev/null || true
+        mkdir "$LOCKDIR" 2>/dev/null || { echo "⚠  Another rebuild is in progress, exiting."; exit 0; }
+    else
+        echo "⚠  Another rebuild is in progress, exiting."
+        exit 0
+    fi
+fi
+trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
 
 # Use venv Python for scanner (needs hermes imports), system Python for the rest
 SCANNER_PYTHON="$VENV_PYTHON"
@@ -73,25 +91,8 @@ echo "▸ Phase 4: Rendering HTML manual..."
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-VERSION=$(python3 -c "import json; print(json.load(open('$MANIFEST'))['version'])" 2>/dev/null || echo "?")
-COUNTS=$(python3 -c "
-import json
-m = json.load(open('$MANIFEST'))
-new = 0; recent = 0
-sections = [m['user_guide']['tools'], m['user_guide']['commands'],
-            m['user_guide'].get('cli_subcommands',[]),
-            m['user_guide']['skills'].get('bundled',[]),
-            m['user_guide']['skills'].get('user_created',[]),
-            m['user_guide']['integrations']]
-for sec in m['technical_reference'].values():
-    if isinstance(sec, list):
-        sections.append(sec)
-for sec in sections:
-    for i in sec:
-        if i.get('is_new'): new += 1
-        if i.get('recently_added'): recent += 1
-print(f'{new} {recent}')
-" 2>/dev/null || echo "0 0")
+VERSION=$("$OTHER_PYTHON" -c "import json; print(json.load(open('$MANIFEST'))['version'])" 2>/dev/null || echo "?")
+COUNTS=$("$OTHER_PYTHON" "$SCRIPT_DIR/_count_flags.py" 2>/dev/null || echo "0 0")
 NEW_COUNT=$(echo "$COUNTS" | cut -d' ' -f1)
 RECENT_COUNT=$(echo "$COUNTS" | cut -d' ' -f2)
 

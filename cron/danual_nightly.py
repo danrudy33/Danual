@@ -12,7 +12,7 @@ MANIFEST = Path.home() / ".hermes/skills/devops/danual/output/manifest.json"
 def main():
     result = subprocess.run(
         ["bash", str(SCRIPT), "--no-enrich"],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=300,
     )
 
     if result.returncode != 0:
@@ -21,7 +21,7 @@ def main():
         return
 
     try:
-        m = json.loads(MANIFEST.read_text())
+        m = json.loads(MANIFEST.read_text(encoding="utf-8"))
     except Exception as e:
         print(f"Could not read manifest: {e}")
         return

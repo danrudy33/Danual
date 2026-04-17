@@ -9,6 +9,7 @@ v2: Compact layout, floating back-to-top, truncated cards, full detail in modals
 import json
 import html
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -22,6 +23,14 @@ logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger("danual-renderer")
 
 E = html.escape
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write via temp-file + os.replace so concurrent readers never see a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _css():
@@ -327,14 +336,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const overlay = document.getElementById('modal-overlay');
   const modal = document.getElementById('modal');
 
+  const SOURCE_LABELS = {hermes: 'Hermes', user: 'You', mcp: 'MCP'};
+  function renderBadges(data) {
+    if (!data || typeof data !== 'object') return '';
+    let h = '';
+    if (data.source && SOURCE_LABELS[data.source]) {
+      h += '<span class="item-tag tag-' + data.source + '">' + SOURCE_LABELS[data.source] + '</span>';
+    }
+    if (data.badge === 'new') {
+      h += '<span class="item-new-badge">✨ NEW</span>';
+    } else if (data.badge === 'recent') {
+      h += '<span class="item-recent-badge">🆕 Recently Added</span>';
+    }
+    return h;
+  }
+  function renderMeta(items) {
+    if (!Array.isArray(items) || !items.length) return '';
+    return items.map(m => {
+      const val = esc(String(m.value || ''));
+      return m.label ? esc(m.label) + ': ' + val : val;
+    }).join(' \u00B7 ');
+  }
+  function safeParse(s, fallback) {
+    try { return JSON.parse(s); } catch (e) { return fallback; }
+  }
+
   allItems.forEach(item => {
     item.addEventListener('click', () => {
-      const data = JSON.parse(item.dataset.explainer || '{}');
+      const data = safeParse(item.dataset.explainer, {});
       const name = item.dataset.itemName || '';
       const desc = item.dataset.fullDesc || '';
-      const badges = item.dataset.badges || '';
+      const badgesData = safeParse(item.dataset.badges, {});
+      const metaData = safeParse(item.dataset.modalMeta, []);
+      const badgesHtml = renderBadges(badgesData);
+      const metaHtml = renderMeta(metaData);
       let h = '<h3>' + esc(name) + '</h3>';
-      if (badges) h += '<div class="modal-badges">' + badges + '</div>';
+      if (badgesHtml) h += '<div class="modal-badges">' + badgesHtml + '</div>';
       if (desc) h += '<div class="modal-desc">' + esc(desc) + '</div>';
       if (data.what_it_does) {
         h += '<div class="modal-section"><h4>What it does</h4><p>' + esc(data.what_it_does) + '</p></div>';
@@ -345,8 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.example_use_case) {
         h += '<div class="modal-section"><h4>Example</h4><p>' + esc(data.example_use_case) + '</p></div>';
       }
-      const meta = item.dataset.modalMeta || '';
-      if (meta) h += '<div class="modal-meta">' + meta + '</div>';
+      if (metaHtml) h += '<div class="modal-meta">' + metaHtml + '</div>';
       modal.innerHTML = '<button class="modal-close" aria-label="Close">&times;</button>' + h;
       overlay.classList.add('active');
       modal.querySelector('.modal-close').addEventListener('click', closeModal);
@@ -361,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Release note modals
   document.querySelectorAll('.release-card').forEach(card => {
     card.addEventListener('click', () => {
-      const data = JSON.parse(card.dataset.release || '{}');
+      const data = safeParse(card.dataset.release, {});
       let h = '<h3>Hermes v' + esc(data.version || '?') + ' Release Notes</h3>';
       if (data.date) h += '<div class="release-stats">' + esc(data.date) + '</div>';
       if (data.stats) h += '<div class="release-stats">' + esc(data.stats) + '</div>';
@@ -405,11 +441,6 @@ def _source_tag(source):
     return '<span class="item-tag tag-hermes">Hermes</span>'
 
 
-def _source_tag_raw(source):
-    """Return the tag HTML for embedding in data attributes (unescaped)."""
-    return _source_tag(source)
-
-
 def _item_classes(item):
     cls = ["item"]
     if item.get("is_new"):
@@ -434,37 +465,50 @@ def _search_text(item):
     return " ".join(p for p in parts if p).lower()
 
 
-def _modal_meta(item):
+def _modal_meta_fields(item):
+    """Return structured [{label, value}] list for the modal footer metadata.
+
+    JS escapes each value before insertion, so raw strings (no pre-escaping) here.
+    """
     parts = []
     if item.get("category"):
-        parts.append(f"Category: {E(item['category'])}")
+        parts.append({"label": "Category", "value": item["category"]})
     if item.get("context") and item["context"] != "both":
-        parts.append(f"{E(item['context'])} only")
+        parts.append({"label": "", "value": f"{item['context']} only"})
     if item.get("source"):
-        parts.append(f"Source: {E(item['source'])}")
+        parts.append({"label": "Source", "value": item["source"]})
     if item.get("added_in_version"):
-        parts.append(f"Added in v{E(item['added_in_version'])}")
+        parts.append({"label": "", "value": f"Added in v{item['added_in_version']}"})
     if item.get("recently_added"):
         added_at = item.get("added_at", "")
         try:
-            from datetime import datetime as _dt
-            ts = _dt.fromisoformat(added_at.replace("Z", "+00:00"))
-            parts.append(f"Recently added ({ts.strftime('%b %d, %Y')})")
+            ts = datetime.fromisoformat(added_at.replace("Z", "+00:00"))
+            parts.append({"label": "", "value": f"Recently added ({ts.strftime('%b %d, %Y')})"})
         except Exception:
-            parts.append("Recently added")
+            parts.append({"label": "", "value": "Recently added"})
     if item.get("parameters"):
-        parts.append(f"Params: {E(', '.join(item['parameters']))}")
+        parts.append({"label": "Params", "value": ", ".join(item["parameters"])})
     if item.get("aliases"):
-        parts.append(f"Aliases: {E(', '.join(item['aliases']))}")
+        parts.append({"label": "Aliases", "value": ", ".join(item["aliases"])})
     if item.get("default_toolset"):
-        parts.append(f"Toolset: {E(item['default_toolset'])}")
+        parts.append({"label": "Toolset", "value": item["default_toolset"]})
     if item.get("schedule"):
-        parts.append(f"Schedule: {E(item['schedule'])}")
+        parts.append({"label": "Schedule", "value": item["schedule"]})
     dv = item.get("default_value")
     if dv is not None and dv != "" and dv != []:
         ds = json.dumps(dv) if not isinstance(dv, str) else dv
-        parts.append(f"Default: {E(str(ds)[:100])}")
-    return " &middot; ".join(parts)
+        parts.append({"label": "Default", "value": str(ds)[:100]})
+    return parts
+
+
+def _badges_data(item):
+    """Return structured badge info for the modal. JS maps source → display label."""
+    data = {"source": item.get("source", "hermes")}
+    if item.get("is_new"):
+        data["badge"] = "new"
+    elif item.get("recently_added"):
+        data["badge"] = "recent"
+    return data
 
 
 def _truncate(text, max_len=90):
@@ -479,11 +523,6 @@ def _render_item(item, name_field="name", show_desc=True, max_desc=90):
     full_desc = desc
     short_desc = _truncate(desc, max_desc) if show_desc else ""
 
-    badge = ""
-    if item.get("is_new"):
-        badge = '<span class="item-new-badge">✨ NEW</span>'
-    elif item.get("recently_added"):
-        badge = '<span class="item-recent-badge">🆕 Recently Added</span>'
     marker = ""
     if item.get("is_new"):
         marker = "✨ "
@@ -494,17 +533,20 @@ def _render_item(item, name_field="name", show_desc=True, max_desc=90):
 
     exp_json = E(json.dumps(item.get("explainer", {})))
     search = E(_search_text(item))
-    meta_html = _modal_meta(item)
-    badges_html = _source_tag(item.get("source", "hermes")) + badge
+    badges_json = E(json.dumps(_badges_data(item)))
+    meta_json = E(json.dumps(_modal_meta_fields(item)))
 
     h = f'<div class="{_item_classes(item)}" data-search="{search}" '
     h += f'data-explainer="{exp_json}" data-item-name="{E(name)}" '
-    h += f'data-full-desc="{E(full_desc)}" data-badges="{E(badges_html)}" '
-    h += f'data-modal-meta="{E(meta_html)}">'
+    h += f'data-full-desc="{E(full_desc)}" data-badges="{badges_json}" '
+    h += f'data-modal-meta="{meta_json}">'
     h += '<div class="item-header">'
     h += f'<span class="item-name">{marker}{E(name)}</span>'
     h += _source_tag(item.get("source", "hermes"))
-    h += badge
+    if item.get("is_new"):
+        h += '<span class="item-new-badge">✨ NEW</span>'
+    elif item.get("recently_added"):
+        h += '<span class="item-recent-badge">🆕 Recently Added</span>'
     h += '<span class="item-info">ℹ</span>'
     h += '</div>'
     if short_desc:
@@ -826,14 +868,19 @@ def main():
         log.error("No manifest.json found.")
         return
 
-    manifest = json.loads(MANIFEST_PATH.read_text())
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     html_content = render(manifest)
 
-    DOCS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = DOCS_DIR / "Hermes_Manual.html"
-    output_path.write_text(html_content, encoding="utf-8")
+    _atomic_write(output_path, html_content)
 
     danual_path = DOCS_DIR / "Danual.html"
+    # Recreate symlink if missing OR broken (is_symlink but target gone)
+    if danual_path.is_symlink() and not danual_path.exists():
+        try:
+            danual_path.unlink()
+        except OSError:
+            pass
     if not danual_path.exists() and not danual_path.is_symlink():
         try:
             danual_path.symlink_to(output_path.name)

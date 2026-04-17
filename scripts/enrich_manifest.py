@@ -8,6 +8,7 @@ On subsequent runs: only enriches items with empty explainers (new items).
 """
 
 import json
+import os
 import re
 import logging
 from pathlib import Path
@@ -18,6 +19,14 @@ MANIFEST_PATH = OUTPUT_DIR / "manifest.json"
 
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger("danual-enricher")
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write via temp-file + os.replace so concurrent readers never see a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 SECTION_INTROS = {
@@ -562,7 +571,7 @@ def enrich():
         log.error("No manifest.json found — run the scanner first.")
         return
 
-    manifest = json.loads(MANIFEST_PATH.read_text())
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     enriched = 0
 
     manifest["section_intros"] = SECTION_INTROS
@@ -625,7 +634,7 @@ def enrich():
             be["explainer"] = _enrich_backend(be)
             enriched += 1
 
-    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    _atomic_write(MANIFEST_PATH, json.dumps(manifest, indent=2, ensure_ascii=False))
     log.info("Enriched %d items. Section intros: %d set.", enriched, len(SECTION_INTROS))
 
 

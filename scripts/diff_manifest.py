@@ -10,6 +10,7 @@ Two badge systems:
 
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -19,6 +20,14 @@ MANIFEST_PATH = OUTPUT_DIR / "manifest.json"
 SNAPSHOT_PATH = OUTPUT_DIR / ".manifest_snapshot.json"
 
 RECENTLY_ADDED_DAYS = 30
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Write via temp-file + os.replace so concurrent readers never see a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
 
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger("danual-differ")
@@ -66,7 +75,7 @@ def _flag_new_items(items, new_names, version, key_field="name"):
     """Mark items whose key_field value is in new_names."""
     count = 0
     for item in items:
-        if item[key_field] in new_names:
+        if item.get(key_field) in new_names:
             item["is_new"] = True
             item["added_in_version"] = version
             count += 1
@@ -81,7 +90,7 @@ def diff_manifest():
         log.error("No manifest.json found — run the scanner first.")
         return None
 
-    manifest = json.loads(MANIFEST_PATH.read_text())
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     current_version = manifest.get("version", "unknown")
     is_first_run = not SNAPSHOT_PATH.exists()
     now = datetime.now(timezone.utc).isoformat()
@@ -90,10 +99,10 @@ def diff_manifest():
         log.info("First run — establishing baseline (nothing marked as new)")
         _clear_all_flags(manifest)
         _save_snapshot(manifest)
-        MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+        _atomic_write(MANIFEST_PATH, json.dumps(manifest, indent=2, ensure_ascii=False))
         return manifest
 
-    previous = json.loads(SNAPSHOT_PATH.read_text())
+    previous = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
     prev_version = previous.get("version", "unknown")
 
     if current_version == prev_version:
@@ -102,12 +111,13 @@ def diff_manifest():
         carried_new = _carry_forward_new_flags(manifest, previous)
         carried_recent = _carry_forward_recently_added(manifest, previous)
         local_added = _detect_local_additions(manifest, previous, now)
+        cascade_recent = _cascade_recently_added(manifest, now)
         manifest["previous_version"] = previous.get("previous_version")
 
         _save_snapshot(manifest)
-        MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
-        log.info("Carried forward %d version-new + %d recently-added flags, %d new local additions",
-                 carried_new, carried_recent, local_added)
+        _atomic_write(MANIFEST_PATH, json.dumps(manifest, indent=2, ensure_ascii=False))
+        log.info("Carried forward %d version-new + %d recently-added flags, %d new local additions (+%d cascaded)",
+                 carried_new, carried_recent, local_added, cascade_recent)
         return manifest
 
     # ── Version change ──
@@ -174,7 +184,7 @@ def diff_manifest():
     log.info("Total new items: %d (including %d cascaded)", total_new, cascade)
 
     _save_snapshot(manifest)
-    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    _atomic_write(MANIFEST_PATH, json.dumps(manifest, indent=2, ensure_ascii=False))
     return manifest
 
 
@@ -232,6 +242,65 @@ def _cascade_new_flags(manifest, version):
 
     if cascaded:
         log.info("  Cascaded: %d related env vars / config options flagged", cascaded)
+    return cascaded
+
+
+def _cascade_recently_added(manifest, now):
+    """Cascade recently_added from newly-added platforms/tools to their env vars/config.
+
+    Parallel to _cascade_new_flags but for the same-version branch. Skips items that are
+    already flagged (is_new or recently_added) so it's idempotent across runs.
+    """
+    ug = manifest.get("user_guide", {})
+    tr = manifest.get("technical_reference", {})
+    cascaded = 0
+
+    new_platform_keys = {
+        integ.get("key", "").lower()
+        for integ in ug.get("integrations", [])
+        if integ.get("recently_added") and integ.get("key")
+    }
+    new_tool_names = {
+        tool.get("name", "").lower()
+        for tool in ug.get("tools", [])
+        if tool.get("recently_added") and tool.get("name")
+    }
+
+    if not (new_platform_keys or new_tool_names):
+        return 0
+
+    for ev in tr.get("environment_variables", []):
+        if ev.get("is_new") or ev.get("recently_added"):
+            continue
+        name_lower = ev.get("name", "").lower()
+        for pk in new_platform_keys:
+            if name_lower.startswith(pk + "_"):
+                ev["recently_added"] = True
+                ev["added_at"] = now
+                cascaded += 1
+                break
+
+    for opt in tr.get("config_options", []):
+        if opt.get("is_new") or opt.get("recently_added"):
+            continue
+        key_lower = opt.get("key", "").lower()
+        matched = False
+        for tn in new_tool_names:
+            if key_lower.startswith(f"auxiliary.{tn}."):
+                opt["recently_added"] = True
+                opt["added_at"] = now
+                cascaded += 1
+                matched = True
+                break
+        if matched:
+            continue
+        for pk in new_platform_keys:
+            if key_lower.startswith(pk + "."):
+                opt["recently_added"] = True
+                opt["added_at"] = now
+                cascaded += 1
+                break
+
     return cascaded
 
 
@@ -366,8 +435,7 @@ def _clear_all_flags(manifest):
 
 def _save_snapshot(manifest):
     """Save a copy of the manifest as the diff baseline."""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    SNAPSHOT_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    _atomic_write(SNAPSHOT_PATH, json.dumps(manifest, indent=2, ensure_ascii=False))
     log.info("Snapshot saved to %s", SNAPSHOT_PATH)
 
 

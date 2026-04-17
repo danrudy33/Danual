@@ -28,6 +28,23 @@ logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger("danual-scanner")
 
 
+def _atomic_write(path: Path, content: str) -> None:
+    """Write via temp-file + os.replace so concurrent readers never see a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _version_sort_key(s: str):
+    """Tolerant semver sort key — extracts integer parts, ignores suffixes like '-rc1'."""
+    parts = []
+    for seg in s.split("."):
+        m = re.match(r"(\d+)", seg)
+        parts.append(int(m.group(1)) if m else 0)
+    return parts
+
+
 def _setup_hermes_imports():
     """Add hermes-agent to sys.path for direct imports."""
     agent_str = str(HERMES_AGENT)
@@ -71,7 +88,10 @@ def scan_tools():
                 "parameters": list(props.keys()),
                 "explainer": {"what_it_does": "", "why_it_matters": "", "example_use_case": ""},
             })
-        log.info("Tools: %d found via registry import", len(tools))
+        if not tools:
+            log.warning("Tools: registry returned 0 entries — registry._snapshot_entries() may have changed")
+        else:
+            log.info("Tools: %d found via registry import", len(tools))
 
     except Exception as exc:
         log.error("Registry import failed (%s), falling back to static scan", exc)
@@ -95,7 +115,7 @@ def _scan_tools_static():
     for f in sorted(tools_dir.glob("*.py")):
         if f.name.startswith("_"):
             continue
-        content = f.read_text(errors="replace")
+        content = f.read_text(encoding="utf-8", errors="replace")
         for m in pattern.finditer(content):
             name, toolset = m.group(1), m.group(2)
             desc = ""
@@ -176,7 +196,7 @@ def scan_cli_subcommands():
         log.warning("main.py not found")
         return []
 
-    content = main_py.read_text(errors="replace")
+    content = main_py.read_text(encoding="utf-8", errors="replace")
     subcommands = []
     seen = set()
 
@@ -202,7 +222,10 @@ def scan_cli_subcommands():
             "explainer": {"what_it_does": "", "why_it_matters": "", "example_use_case": ""},
         })
 
-    log.info("CLI subcommands: %d found", len(subcommands))
+    if not subcommands:
+        log.warning("CLI subcommands: 0 found — argparse pattern may have changed in main.py")
+    else:
+        log.info("CLI subcommands: %d found", len(subcommands))
     return subcommands
 
 
@@ -247,7 +270,7 @@ def scan_skills():
 
 def _parse_skill_md(path):
     """Parse YAML frontmatter from a SKILL.md file."""
-    text = path.read_text(errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
     if not text.startswith("---"):
         return {"name": path.parent.name}
     parts = text.split("---", 2)
@@ -299,7 +322,7 @@ def scan_mcp_servers():
     servers = []
     try:
         import yaml
-        config = yaml.safe_load(CONFIG_PATH.read_text())
+        config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
         mcp = config.get("mcp_servers", {}) or {}
         for name, cfg in mcp.items():
             servers.append({
@@ -339,18 +362,7 @@ def _flatten_config(d, prefix, result):
     """Recursively flatten a nested config dict into dotpath entries."""
     for key, value in d.items():
         full_key = f"{prefix}.{key}" if prefix else key
-        if isinstance(value, dict) and value and not any(isinstance(v, (dict, list)) for v in value.values()):
-            for k2, v2 in value.items():
-                nested_key = f"{full_key}.{k2}"
-                result.append({
-                    "key": nested_key,
-                    "description": "",
-                    "default_value": _json_safe(v2),
-                    "source": "hermes",
-                    "is_new": False,
-                    "explainer": {"what_it_does": "", "why_it_matters": "", "example_use_case": ""},
-                })
-        elif isinstance(value, dict) and value:
+        if isinstance(value, dict) and value:
             _flatten_config(value, full_key, result)
         else:
             result.append({
@@ -396,7 +408,7 @@ def scan_env_vars():
     env_example = HERMES_AGENT / ".env.example"
     if env_example.exists():
         pattern = re.compile(r"^#?\s*([A-Z][A-Z0-9_]+)\s*=", re.MULTILINE)
-        content = env_example.read_text()
+        content = env_example.read_text(encoding="utf-8", errors="replace")
         extra = 0
         for m in pattern.finditer(content):
             name = m.group(1)
@@ -420,7 +432,7 @@ def scan_env_vars():
     env_doc = HERMES_AGENT / "website" / "docs" / "reference" / "environment-variables.md"
     if env_doc.exists():
         pattern = re.compile(r"\|\s*`([A-Z][A-Z0-9_]+)`\s*\|\s*(.+?)\s*\|")
-        content = env_doc.read_text()
+        content = env_doc.read_text(encoding="utf-8", errors="replace")
         extra = 0
         for m in pattern.finditer(content):
             name, desc = m.group(1), m.group(2).strip()
@@ -456,7 +468,7 @@ def scan_cron_jobs():
         return jobs
 
     try:
-        data = json.loads(jobs_file.read_text())
+        data = json.loads(jobs_file.read_text(encoding="utf-8"))
         for job in data.get("jobs", []):
             jobs.append({
                 "name": job.get("name", job.get("id", "unknown")),
@@ -523,7 +535,7 @@ def scan_release_notes():
         if not m:
             continue
         version = m.group(1)
-        content = f.read_text(errors="replace")
+        content = f.read_text(encoding="utf-8", errors="replace")
 
         header_match = re.search(r"#\s*Hermes Agent v[\d.]+\s*\(v([\d.]+)\)", content)
         date_match = re.search(r"\*\*Release Date:\*\*\s*(.+)", content)
@@ -577,7 +589,7 @@ def scan_release_notes():
             "sections": sections,
         })
 
-    releases.sort(key=lambda r: [int(x) for x in r["version"].split(".")], reverse=True)
+    releases.sort(key=lambda r: _version_sort_key(r["version"]), reverse=True)
     log.info("Release notes: %d versions parsed", len(releases))
     return releases
 
@@ -590,9 +602,13 @@ def get_current_version():
 
     release_files = sorted(
         HERMES_AGENT.glob("RELEASE_v*.md"),
-        key=lambda f: [int(x) for x in re.findall(r"\d+", f.stem)],
+        key=lambda f: _version_sort_key("".join(re.findall(r"\d+|\.", f.stem))),
     )
-    semver = re.search(r"v([\d.]+)", release_files[-1].stem).group(1) if release_files else "0.0.0"
+    semver = "0.0.0"
+    if release_files:
+        m = re.search(r"v([\d.]+)", release_files[-1].stem)
+        if m:
+            semver = m.group(1)
 
     try:
         tag = subprocess.check_output(
@@ -692,12 +708,12 @@ def build_manifest():
 
 
 def _merge_existing_enrichment(manifest):
-    """Preserve explainers and section intros from a previously enriched manifest."""
+    """Preserve explainers, section intros, and flags from a previously written manifest."""
     existing_path = OUTPUT_DIR / "manifest.json"
     if not existing_path.exists():
         return
     try:
-        existing = json.loads(existing_path.read_text())
+        existing = json.loads(existing_path.read_text(encoding="utf-8"))
     except Exception:
         return
 
@@ -707,7 +723,12 @@ def _merge_existing_enrichment(manifest):
             manifest["section_intros"][key] = val
 
     def _build_lookup(items, key_field="name"):
-        return {item[key_field]: item.get("explainer", {}) for item in items}
+        """Build lookup of item-key → (explainer, flag-fields) from old items."""
+        return {
+            item.get(key_field, ""): item
+            for item in items
+            if item.get(key_field)
+        }
 
     old_ug = existing.get("user_guide", {})
     old_tr = existing.get("technical_reference", {})
@@ -742,25 +763,39 @@ def _merge_existing_enrichment(manifest):
         (tr.get("cron_jobs", []), "cron_jobs", "name"),
         (tr.get("terminal_backends", []), "terminal_backends", "name"),
     ]
-    merged = 0
+    merged_exp = 0
+    merged_flags = 0
     for items, section_key, key_field in sections:
         lk = lookups.get((section_key, key_field), {})
         for item in items:
-            old_exp = lk.get(item.get(key_field, ""), {})
+            old_item = lk.get(item.get(key_field, ""))
+            if not old_item:
+                continue
+            old_exp = old_item.get("explainer", {})
             if old_exp.get("what_it_does") and not item.get("explainer", {}).get("what_it_does"):
                 item["explainer"] = old_exp
-                merged += 1
-    if merged:
-        log.info("Merged %d cached explainers from previous manifest", merged)
+                merged_exp += 1
+            if old_item.get("is_new") and not item.get("is_new"):
+                item["is_new"] = True
+                if old_item.get("added_in_version"):
+                    item["added_in_version"] = old_item["added_in_version"]
+                merged_flags += 1
+            if old_item.get("recently_added") and not item.get("recently_added"):
+                item["recently_added"] = True
+                if old_item.get("added_at"):
+                    item["added_at"] = old_item["added_at"]
+                merged_flags += 1
+    if merged_exp or merged_flags:
+        log.info("Merged %d cached explainers and %d flags from previous manifest",
+                 merged_exp, merged_flags)
 
 
 def main():
     manifest = build_manifest()
     _merge_existing_enrichment(manifest)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / "manifest.json"
-    output_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    _atomic_write(output_path, json.dumps(manifest, indent=2, ensure_ascii=False))
 
     summary = (
         f"\n  ══════════════════════════════════════\n"
