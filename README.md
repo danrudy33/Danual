@@ -194,7 +194,7 @@ Open an issue or PR. The scanner has hardcoded paths for Hermes internals — fu
 
 ## License
 
-[Pick one — MIT is the friendly default. See LICENSE.]
+MIT — see [LICENSE](LICENSE).
 
 ---
 
