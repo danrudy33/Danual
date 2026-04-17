@@ -106,4 +106,16 @@ elif [ "$RECENT_COUNT" -gt 0 ] 2>/dev/null; then
 fi
 echo "$MSG"
 echo "   View: file://$MANUAL"
+
+# Tip: suggest the 'danual' alias if it's not already set in a common rc file
+HAS_ALIAS=false
+for RC in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    if [ -f "$RC" ] && grep -q "alias danual=" "$RC" 2>/dev/null; then
+        HAS_ALIAS=true
+        break
+    fi
+done
+if ! $HAS_ALIAS; then
+    echo "   Tip: run '$SCRIPT_DIR/install-alias.sh' to add a 'danual' shortcut"
+fi
 echo ""
