@@ -37,12 +37,18 @@ if ! mkdir "$LOCKDIR" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
 
-# Use venv Python for scanner (needs hermes imports), system Python for the rest
+# Scanner needs hermes imports (venv Python).
+# Differ needs pyyaml to read the recently_added_days config override — use venv if present.
+# Enricher and renderer only need stdlib, so system Python is fine.
 SCANNER_PYTHON="$VENV_PYTHON"
 if [ ! -f "$SCANNER_PYTHON" ]; then
     echo "⚠  Hermes venv Python not found at $VENV_PYTHON"
     echo "   Falling back to system Python (static scan only)"
     SCANNER_PYTHON="$SYSTEM_PYTHON"
+fi
+DIFFER_PYTHON="$VENV_PYTHON"
+if [ ! -f "$DIFFER_PYTHON" ]; then
+    DIFFER_PYTHON="$SYSTEM_PYTHON"
 fi
 OTHER_PYTHON="$SYSTEM_PYTHON"
 
@@ -73,7 +79,7 @@ fi
 # Step 2: Differ
 echo ""
 echo "▸ Phase 2: Diffing against previous snapshot..."
-"$OTHER_PYTHON" "$SCRIPT_DIR/diff_manifest.py"
+"$DIFFER_PYTHON" "$SCRIPT_DIR/diff_manifest.py"
 
 # Step 3: Enricher (unless --no-enrich)
 if ! $NO_ENRICH; then

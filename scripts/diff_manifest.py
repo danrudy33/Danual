@@ -5,7 +5,8 @@ Compares current manifest against previous snapshot, flags new items.
 
 Two badge systems:
   - is_new (green ✨): Items new in a Hermes version update. Cleared on next version change.
-  - recently_added (blue 🆕): User/local items detected between versions. Time-based (30 days).
+  - recently_added (blue 🆕): User/local items detected between versions. Time-based,
+    default 30 days; override via `danual.recently_added_days` in ~/.hermes/config.yaml.
 """
 
 import json
@@ -18,8 +19,10 @@ SCRIPT_DIR = Path(__file__).parent
 OUTPUT_DIR = SCRIPT_DIR.parent / "output"
 MANIFEST_PATH = OUTPUT_DIR / "manifest.json"
 SNAPSHOT_PATH = OUTPUT_DIR / ".manifest_snapshot.json"
+CONFIG_PATH = Path.home() / ".hermes" / "config.yaml"
 
-RECENTLY_ADDED_DAYS = 30
+# Fallback used if config.yaml doesn't set danual.recently_added_days.
+DEFAULT_RECENTLY_ADDED_DAYS = 30
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -29,8 +32,35 @@ def _atomic_write(path: Path, content: str) -> None:
     tmp.write_text(content, encoding="utf-8")
     os.replace(tmp, path)
 
+
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger("danual-differ")
+
+
+def _recently_added_days():
+    """Return the configured recently-added window in days.
+
+    Reads ~/.hermes/config.yaml for danual.recently_added_days (positive int).
+    Falls back to DEFAULT_RECENTLY_ADDED_DAYS on missing key, malformed YAML,
+    or invalid value.
+    """
+    if not CONFIG_PATH.exists():
+        return DEFAULT_RECENTLY_ADDED_DAYS
+    try:
+        import yaml
+        config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        val = (config.get("danual") or {}).get("recently_added_days")
+        if val is None:
+            return DEFAULT_RECENTLY_ADDED_DAYS
+        if isinstance(val, bool) or not isinstance(val, int) or val < 1:
+            log.warning("Invalid danual.recently_added_days (%r) — using default %d",
+                        val, DEFAULT_RECENTLY_ADDED_DAYS)
+            return DEFAULT_RECENTLY_ADDED_DAYS
+        return val
+    except Exception as exc:
+        log.warning("Could not read config.yaml (%s) — using default %d",
+                    exc, DEFAULT_RECENTLY_ADDED_DAYS)
+        return DEFAULT_RECENTLY_ADDED_DAYS
 
 
 def _all_sections(manifest):
@@ -334,7 +364,8 @@ def _carry_forward_new_flags(manifest, previous):
 
 def _carry_forward_recently_added(manifest, previous):
     """Copy recently_added/added_at from previous snapshot, expiring old ones."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=RECENTLY_ADDED_DAYS)
+    days = _recently_added_days()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     prev_flags = {}
 
     for items, key_field, section_key in _all_sections(previous):

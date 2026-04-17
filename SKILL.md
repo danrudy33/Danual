@@ -20,6 +20,7 @@ A self-updating, browser-based HTML manual that regenerates after every Hermes u
 - **Dual badge system**:
   - ✨ **NEW in vX.X** (green): Items from a Hermes version update, cleared on next update
   - 🆕 **Recently Added** (blue): User/local items, persists 30 days regardless of updates
+  - Override the 30-day window by adding `danual: { recently_added_days: N }` to `~/.hermes/config.yaml`
 - **Cascade detection**: New platforms auto-flag their env vars and config options
 - **Source distinction**: `[Hermes]` bundled vs `[You]` user-created, color-coded
 - **Release history**: Full release notes with clickable scrollable modals
