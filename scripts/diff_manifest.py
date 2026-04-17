@@ -34,20 +34,25 @@ log = logging.getLogger("danual-differ")
 
 
 def _all_sections(manifest):
-    """Yield (items_list, key_field) for every section in the manifest."""
+    """Yield (items_list, key_field, section_key) for every section in the manifest.
+
+    section_key is a stable string identifier used for cross-manifest flag lookups
+    (replaces the prior id()-based matching, which was fragile when a key was missing).
+    """
     ug = manifest.get("user_guide", {})
     tr = manifest.get("technical_reference", {})
-    yield ug.get("tools", []), "name"
-    yield ug.get("commands", []), "name"
-    yield ug.get("cli_subcommands", []), "name"
-    yield ug.get("skills", {}).get("bundled", []), "name"
-    yield ug.get("skills", {}).get("user_created", []), "name"
-    yield ug.get("integrations", []), "key"
-    yield tr.get("config_options", []), "key"
-    yield tr.get("environment_variables", []), "name"
-    yield tr.get("mcp_servers", []), "name"
-    yield tr.get("cron_jobs", []), "name"
-    yield tr.get("terminal_backends", []), "name"
+    skills = ug.get("skills", {}) or {}
+    yield ug.get("tools", []), "name", "tools"
+    yield ug.get("commands", []), "name", "commands"
+    yield ug.get("cli_subcommands", []), "name", "cli_subcommands"
+    yield skills.get("bundled", []), "name", "skills_bundled"
+    yield skills.get("user_created", []), "name", "skills_user"
+    yield ug.get("integrations", []), "key", "integrations"
+    yield tr.get("config_options", []), "key", "config_options"
+    yield tr.get("environment_variables", []), "name", "environment_variables"
+    yield tr.get("mcp_servers", []), "name", "mcp_servers"
+    yield tr.get("cron_jobs", []), "name", "cron_jobs"
+    yield tr.get("terminal_backends", []), "name", "terminal_backends"
 
 
 def _extract_item_names(manifest):
@@ -175,7 +180,7 @@ def diff_manifest():
     total_new += cascade
 
     # Clear any recently_added flags — version change resets the user-additions slate
-    for items, _ in _all_sections(manifest):
+    for items, _, _ in _all_sections(manifest):
         for item in items:
             item.pop("recently_added", None)
             item.pop("added_at", None)
@@ -307,26 +312,9 @@ def _cascade_recently_added(manifest, now):
 def _detect_local_additions(manifest, previous, now):
     """Find items in current manifest not in snapshot — flag as recently_added."""
     prev_names = _extract_item_names(previous)
-    curr_names = _extract_item_names(manifest)
-    ug = manifest["user_guide"]
-    tr = manifest["technical_reference"]
     total = 0
 
-    section_map = [
-        (ug.get("tools", []), "name", "tools"),
-        (ug.get("commands", []), "name", "commands"),
-        (ug.get("cli_subcommands", []), "name", "cli_subcommands"),
-        (ug.get("skills", {}).get("bundled", []), "name", "skills_bundled"),
-        (ug.get("skills", {}).get("user_created", []), "name", "skills_user"),
-        (ug.get("integrations", []), "key", "integrations"),
-        (tr.get("config_options", []), "key", "config_options"),
-        (tr.get("environment_variables", []), "name", "environment_variables"),
-        (tr.get("mcp_servers", []), "name", "mcp_servers"),
-        (tr.get("cron_jobs", []), "name", "cron_jobs"),
-        (tr.get("terminal_backends", []), "name", "terminal_backends"),
-    ]
-
-    for items, key_field, section_key in section_map:
+    for items, key_field, section_key in _all_sections(manifest):
         old_names = prev_names.get(section_key, set())
         for item in items:
             item_key = item.get(key_field, "")
@@ -349,7 +337,7 @@ def _carry_forward_recently_added(manifest, previous):
     cutoff = datetime.now(timezone.utc) - timedelta(days=RECENTLY_ADDED_DAYS)
     prev_flags = {}
 
-    for items, key_field in _all_sections(previous):
+    for items, key_field, section_key in _all_sections(previous):
         for item in items:
             if not item.get("recently_added"):
                 continue
@@ -360,17 +348,12 @@ def _carry_forward_recently_added(manifest, previous):
                     continue
             except (ValueError, AttributeError):
                 continue
-            section_prefix = _section_prefix(items, previous)
-            prev_flags[(section_prefix, item.get(key_field, ""))] = added_at
+            prev_flags[(section_key, item.get(key_field, ""))] = added_at
 
-    ug = manifest["user_guide"]
-    tr = manifest["technical_reference"]
     total = 0
-
-    for items, key_field in _all_sections(manifest):
-        sp = _section_prefix(items, manifest)
+    for items, key_field, section_key in _all_sections(manifest):
         for item in items:
-            key = (sp, item.get(key_field, ""))
+            key = (section_key, item.get(key_field, ""))
             if key in prev_flags:
                 item["recently_added"] = True
                 item["added_at"] = prev_flags[key]
@@ -380,23 +363,21 @@ def _carry_forward_recently_added(manifest, previous):
 
 
 def _build_flag_lookup(manifest, flag_field, value_field):
-    """Build a {(section_prefix, item_key): value} lookup for flagged items."""
+    """Build a {(section_key, item_key): value} lookup for flagged items."""
     lookup = {}
-    for items, key_field in _all_sections(manifest):
-        sp = _section_prefix(items, manifest)
+    for items, key_field, section_key in _all_sections(manifest):
         for item in items:
             if item.get(flag_field):
-                lookup[(sp, item.get(key_field, ""))] = item.get(value_field)
+                lookup[(section_key, item.get(key_field, ""))] = item.get(value_field)
     return lookup
 
 
 def _apply_flag_lookup(manifest, lookup, flag_field, value_field):
     """Apply a flag lookup to the manifest."""
     total = 0
-    for items, key_field in _all_sections(manifest):
-        sp = _section_prefix(items, manifest)
+    for items, key_field, section_key in _all_sections(manifest):
         for item in items:
-            key = (sp, item.get(key_field, ""))
+            key = (section_key, item.get(key_field, ""))
             if key in lookup:
                 item[flag_field] = True
                 item[value_field] = lookup[key]
@@ -404,29 +385,9 @@ def _apply_flag_lookup(manifest, lookup, flag_field, value_field):
     return total
 
 
-def _section_prefix(items, manifest):
-    """Determine a unique prefix for a section based on its identity in the manifest."""
-    ug = manifest.get("user_guide", {})
-    tr = manifest.get("technical_reference", {})
-    id_map = {
-        id(ug.get("tools", [])): "tool",
-        id(ug.get("commands", [])): "cmd",
-        id(ug.get("cli_subcommands", [])): "cli",
-        id(ug.get("skills", {}).get("bundled", [])): "skill_b",
-        id(ug.get("skills", {}).get("user_created", [])): "skill_u",
-        id(ug.get("integrations", [])): "integ",
-        id(tr.get("config_options", [])): "cfg",
-        id(tr.get("environment_variables", [])): "env",
-        id(tr.get("mcp_servers", [])): "mcp",
-        id(tr.get("cron_jobs", [])): "cron",
-        id(tr.get("terminal_backends", [])): "be",
-    }
-    return id_map.get(id(items), "unknown")
-
-
 def _clear_all_flags(manifest):
     """Ensure all items have is_new=False and no recently_added."""
-    for items, _ in _all_sections(manifest):
+    for items, _, _ in _all_sections(manifest):
         for item in items:
             item["is_new"] = False
             item.pop("recently_added", None)
@@ -446,7 +407,7 @@ def main():
     if manifest:
         new_count = 0
         recent_count = 0
-        for items, _ in _all_sections(manifest):
+        for items, _, _ in _all_sections(manifest):
             for item in items:
                 if item.get("is_new"):
                     new_count += 1
