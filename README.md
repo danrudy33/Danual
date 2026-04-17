@@ -56,11 +56,30 @@ No server, no external assets, no network calls — one self-contained HTML file
 ```bash
 cd ~/.hermes/skills/devops/
 git clone https://github.com/danrudy33/Danual.git danual
-bash danual/scripts/update_manual.sh
+bash danual/scripts/install.sh
 open ~/.hermes/docs/Danual.html
 ```
 
-That's the whole setup. After the first rebuild, the manual lives at `~/.hermes/docs/Hermes_Manual.html` (and as a `Danual.html` symlink next to it).
+`install.sh` is idempotent and does three things:
+1. Symlinks the gateway startup hook into `~/.hermes/hooks/` (so the manual auto-rebuilds after every `hermes update`).
+2. Symlinks the nightly-cron helper script into `~/.hermes/scripts/`.
+3. Runs the first full build.
+
+After install, the manual lives at `~/.hermes/docs/Hermes_Manual.html` (and as a `Danual.html` symlink next to it). Because the hook and cron helper are *symlinks* back to the repo, `git pull` in the repo directory is enough to pick up future updates — nothing to reinstall.
+
+### Optional: nightly cron
+
+The gateway hook catches every `hermes update`, but if you want to also catch user-added skills / MCP servers / cron jobs that appear *between* Hermes updates, register the nightly rebuild via Hermes's cron system:
+
+```bash
+hermes cron create \
+    --name 'Danual Nightly Rebuild' \
+    --script danual_nightly.py \
+    --schedule '0 4 * * *' \
+    --deliver '<your-telegram-or-discord-target>'
+```
+
+(Replace the `--deliver` target with wherever you want the nightly summary sent.)
 
 ### Optional: one-word shortcut
 
@@ -135,6 +154,7 @@ The **manifest** is a JSON file holding every item the scanner found, plus flag 
 
 | Path | Purpose |
 | --- | --- |
+| `scripts/install.sh` | One-shot installer — symlinks hook + cron helper into Hermes, runs first build |
 | `scripts/update_manual.sh` | Pipeline orchestrator + lockfile |
 | `scripts/regenerate_manual.py` | Scanner — imports Hermes registries (with regex fallback) |
 | `scripts/diff_manifest.py` | Differ — snapshot-based flag tracking, cascade logic |
