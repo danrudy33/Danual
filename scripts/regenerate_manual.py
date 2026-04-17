@@ -24,6 +24,11 @@ SCRIPT_DIR = Path(__file__).parent
 OUTPUT_DIR = SCRIPT_DIR.parent / "output"
 DOCS_DIR = HERMES_HOME / "docs"
 
+# Bump when the manifest format changes in a non-backward-compatible way.
+# The differ compares snapshot.schema_version to this; on mismatch it
+# rebaselines instead of silently misinterpreting old data.
+SCHEMA_VERSION = 1
+
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 log = logging.getLogger("danual-scanner")
 
@@ -667,6 +672,7 @@ def build_manifest():
 
     manifest = {
         "platform": "hermes",
+        "schema_version": SCHEMA_VERSION,
         "version": version,
         "git_tag": git_tag,
         "generated_at": datetime.now(timezone.utc).isoformat(),

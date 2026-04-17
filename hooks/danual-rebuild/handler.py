@@ -5,8 +5,8 @@ Only triggers a full rebuild if the Hermes version changed.
 Always does a quick scan to catch user-added items (skills, MCP servers, etc).
 """
 
+import asyncio
 import json
-import subprocess
 import logging
 from pathlib import Path
 
@@ -57,9 +57,13 @@ async def handle(event_type: str, context: dict) -> None:
 
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        # Open log file; Popen dups the fd for the child, so we can close the parent
-        # handle via the `with` block after the subprocess is spawned.
+        # Open log file; asyncio dups the fd for the child, so we can close the parent
+        # handle via the `with` block once the subprocess has been spawned.
         with open(LOG_FILE, "a", encoding="utf-8") as logfh:
-            subprocess.Popen(cmd, stdout=logfh, stderr=subprocess.STDOUT, close_fds=True)
+            await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=logfh,
+                stderr=asyncio.subprocess.STDOUT,
+            )
     except Exception as exc:
         log.error("Danual rebuild failed to start: %s", exc)

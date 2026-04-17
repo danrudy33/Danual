@@ -24,6 +24,17 @@ CONFIG_PATH = Path.home() / ".hermes" / "config.yaml"
 # Fallback used if config.yaml doesn't set danual.recently_added_days.
 DEFAULT_RECENTLY_ADDED_DAYS = 30
 
+# Must match SCHEMA_VERSION in regenerate_manual.py. Older snapshots without
+# this field are treated as v1 for backward compatibility.
+CURRENT_SCHEMA_VERSION = 1
+
+# Items Danual creates about itself — never flag as recently_added (avoids
+# the manual loudly announcing its own installation as a "new feature").
+# Match by (section_key, item_key).
+SELF_REFERENTIAL_ITEMS = {
+    ("cron_jobs", "Danual Nightly Rebuild"),
+}
+
 
 def _atomic_write(path: Path, content: str) -> None:
     """Write via temp-file + os.replace so concurrent readers never see a half-written file."""
@@ -138,6 +149,18 @@ def diff_manifest():
         return manifest
 
     previous = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+
+    # Schema-version guard: if the saved snapshot was written by an incompatible
+    # format, rebaseline instead of silently misinterpreting it.
+    prev_schema = previous.get("schema_version", 1)
+    if prev_schema != CURRENT_SCHEMA_VERSION:
+        log.warning("Snapshot schema_version %s != current %s — rebaselining",
+                    prev_schema, CURRENT_SCHEMA_VERSION)
+        _clear_all_flags(manifest)
+        _save_snapshot(manifest)
+        _atomic_write(MANIFEST_PATH, json.dumps(manifest, indent=2, ensure_ascii=False))
+        return manifest
+
     prev_version = previous.get("version", "unknown")
 
     if current_version == prev_version:
@@ -145,6 +168,7 @@ def diff_manifest():
 
         carried_new = _carry_forward_new_flags(manifest, previous)
         carried_recent = _carry_forward_recently_added(manifest, previous)
+        _unflag_self_items(manifest)
         local_added = _detect_local_additions(manifest, previous, now)
         cascade_recent = _cascade_recently_added(manifest, now)
         manifest["previous_version"] = previous.get("previous_version")
@@ -340,7 +364,11 @@ def _cascade_recently_added(manifest, now):
 
 
 def _detect_local_additions(manifest, previous, now):
-    """Find items in current manifest not in snapshot — flag as recently_added."""
+    """Find items in current manifest not in snapshot — flag as recently_added.
+
+    Skips entries in SELF_REFERENTIAL_ITEMS so Danual doesn't announce its own
+    setup artifacts as user additions.
+    """
     prev_names = _extract_item_names(previous)
     total = 0
 
@@ -348,6 +376,8 @@ def _detect_local_additions(manifest, previous, now):
         old_names = prev_names.get(section_key, set())
         for item in items:
             item_key = item.get(key_field, "")
+            if (section_key, item_key) in SELF_REFERENTIAL_ITEMS:
+                continue
             if item_key not in old_names and not item.get("is_new") and not item.get("recently_added"):
                 item["recently_added"] = True
                 item["added_at"] = now
@@ -423,6 +453,19 @@ def _clear_all_flags(manifest):
             item["is_new"] = False
             item.pop("recently_added", None)
             item.pop("added_at", None)
+
+
+def _unflag_self_items(manifest):
+    """Strip recently_added from Danual's own setup artifacts (e.g., its own cron job).
+
+    The manual shouldn't announce its own installation as a user addition.
+    Run after carry-forward so any historically-flagged entries are cleaned up.
+    """
+    for items, key_field, section_key in _all_sections(manifest):
+        for item in items:
+            if (section_key, item.get(key_field, "")) in SELF_REFERENTIAL_ITEMS:
+                item.pop("recently_added", None)
+                item.pop("added_at", None)
 
 
 def _save_snapshot(manifest):
