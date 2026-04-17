@@ -19,7 +19,7 @@ When Hermes bumps from v0.9.0 to v0.10.0, you don't read a changelog — you ope
 
 ## What it covers
 
-[Hermes](https://github.com/dealsinengines/hermes-agent) is a personal AI-agent platform with dozens of tools, hundreds of config options, and a whole ecosystem of skills. The Danual catalogs all of it in one searchable HTML file with plain-English explainers:
+[Hermes](https://github.com/NousResearch/hermes-agent) is a personal AI-agent platform with dozens of tools, hundreds of config options, and a whole ecosystem of skills. The Danual catalogs all of it in one searchable HTML file with plain-English explainers:
 
 47 tools · 51 slash commands · 73 CLI subcommands · 90 skills · 19 platform integrations · 170 config options · 299 env vars · MCP servers · cron jobs · full release history.
 
@@ -47,7 +47,7 @@ No server, no external assets, no network calls — one self-contained HTML file
 
 ### Requirements
 
-- An existing [Hermes](https://github.com/dealsinengines/hermes-agent) install at `~/.hermes/`
+- An existing [Hermes](https://github.com/NousResearch/hermes-agent) install at `~/.hermes/`
 - Python 3.11 in the Hermes venv (standard with Hermes)
 - macOS or Linux (Windows untested)
 
