@@ -212,6 +212,17 @@ Open an issue or PR. The scanner has hardcoded paths for Hermes internals — fu
 
 ---
 
+## Known limitations
+
+Being upfront about what hasn't been exhaustively tested:
+
+- **Hermes version.** Built and tested against Hermes v0.9.0. The scanner reads a few Hermes internals (`registry._snapshot_entries()`, `COMMAND_REGISTRY`, `DEFAULT_CONFIG`) — if a future Hermes refactor renames these, the affected section comes back empty with a warning in the scanner output (no crash, but the manual won't show those items until the scanner is updated). PRs welcome when that happens.
+- **Platforms.** Tested end-to-end on macOS. Linux paths are POSIX-safe and the alias installer detects `xdg-open` vs `open`, but a Linux run hasn't been verified yet. Windows is untested.
+- **First release.** This is v1 of an open-source release — it's been used daily on a single install for weeks, but hasn't seen wide real-world testing. Surprises likely exist.
+- **MCP server scan** reads `~/.hermes/config.yaml`; if your install keeps MCP configs elsewhere, that section will be empty.
+
+Open an issue if anything misbehaves — the scanner and differ are instrumented to log what they couldn't find, so a paste of the output usually points straight at the problem.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
