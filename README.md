@@ -1,25 +1,29 @@
 # The Danual 📘
 
-> **Dan's Dynamic-Manual for Hermes** — a living, version-aware HTML manual that regenerates itself whenever Hermes updates or whenever you add new skills, MCP servers, or cron jobs.
+> **Dan's Dynamic-Manual for Hermes** — an auto-updating HTML manual that flags exactly what changed in every Hermes update, so you always know what's new.
 
 ![The Danual — main view](docs/screenshots/hero.png)
 
 ---
 
-## What is this?
+## What makes this different
 
-[Hermes](https://github.com/dealsinengines/hermes-agent) is a personal AI-agent platform with dozens of tools, hundreds of config options, and a whole ecosystem of skills you can install or create. Keeping track of what's available in *your specific install* — your tools, your custom skills, your MCP servers, your cron jobs — gets hard quickly.
+Most documentation is a snapshot: someone writes it, you read it, it goes stale. **The Danual is dynamic.** It regenerates itself after every Hermes update, and again every night — scanning the actual state of your install and flagging anything that appeared since the last run:
 
-**The Danual scans your Hermes installation and generates a searchable HTML manual of everything in it.** 47 tools, 51 slash commands, 73 CLI subcommands, 90 skills, 19 platform integrations, 170 config options, 299 env vars, MCP servers, cron jobs, release notes — all in a single HTML file you open in your browser.
+- ✨ **NEW in vX.X** (green) — arrived with the most recent Hermes update. You can see what a release changed in a single glance instead of hunting through patch notes.
+- 🆕 **Recently Added** (blue) — items *you* added locally between updates (your custom skills, new MCP servers, new cron jobs). Persists 30 days, configurable.
 
-It also tells you what changed:
-
-- ✨ **NEW in vX.X** (green) — items that arrived with the most recent Hermes update. Cleared on the next version bump.
-- 🆕 **Recently Added** (blue) — items *you* added locally between Hermes updates. Persists 30 days (configurable).
-
-No server, no external assets, no network calls. One self-contained HTML file.
+When Hermes bumps from v0.9.0 to v0.10.0, you don't read a changelog — you open the manual, see everything new highlighted in green, and click any of it to find out what it does. The green flags clear themselves on the next version; the blue flags expire on their own. Nothing to maintain, nothing to remember.
 
 ![Green "What's new" banner and blue "Recent user additions" banner](docs/screenshots/banners.png)
+
+## What it covers
+
+[Hermes](https://github.com/dealsinengines/hermes-agent) is a personal AI-agent platform with dozens of tools, hundreds of config options, and a whole ecosystem of skills. The Danual catalogs all of it in one searchable HTML file with plain-English explainers:
+
+47 tools · 51 slash commands · 73 CLI subcommands · 90 skills · 19 platform integrations · 170 config options · 299 env vars · MCP servers · cron jobs · full release history.
+
+No server, no external assets, no network calls — one self-contained HTML file you open in your browser.
 
 ---
 
