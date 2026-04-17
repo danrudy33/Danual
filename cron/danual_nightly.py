@@ -5,8 +5,8 @@ import subprocess
 import json
 from pathlib import Path
 
-SCRIPT = Path.home() / ".hermes/skills/devops/living-manual/scripts/update_manual.sh"
-MANIFEST = Path.home() / ".hermes/skills/devops/living-manual/output/manifest.json"
+SCRIPT = Path.home() / ".hermes/skills/devops/danual/scripts/update_manual.sh"
+MANIFEST = Path.home() / ".hermes/skills/devops/danual/output/manifest.json"
 
 
 def main():

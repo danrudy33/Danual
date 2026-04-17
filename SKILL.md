@@ -1,5 +1,5 @@
 ---
-name: living-manual
+name: danual
 description: "The Danual — auto-generate a living, version-aware HTML manual for your Hermes instance. Scans tools, commands, CLI subcommands, skills, integrations, MCP servers, cron jobs, config, and env vars. Highlights new features per release (green) and recent user additions (blue, 30-day). Self-contained HTML with search, clickable explainers, and color-coded entries. Auto-rebuilds via gateway hook and nightly cron."
 version: 2.0.0
 metadata:
@@ -30,13 +30,13 @@ A self-updating, browser-based HTML manual that regenerates after every Hermes u
 
 ```bash
 # Full pipeline: scan → diff → enrich → render
-~/.hermes/skills/devops/living-manual/scripts/update_manual.sh
+~/.hermes/skills/devops/danual/scripts/update_manual.sh
 
 # Quick re-render (skip enrichment, uses cached explainers)
-~/.hermes/skills/devops/living-manual/scripts/update_manual.sh --no-enrich
+~/.hermes/skills/devops/danual/scripts/update_manual.sh --no-enrich
 
 # Scan only (just produce manifest.json)
-~/.hermes/skills/devops/living-manual/scripts/update_manual.sh --scan-only
+~/.hermes/skills/devops/danual/scripts/update_manual.sh --scan-only
 ```
 
 ## Auto-Rebuild Triggers
@@ -47,7 +47,7 @@ A self-updating, browser-based HTML manual that regenerates after every Hermes u
 ## Output
 
 - **Manual**: `~/.hermes/docs/Hermes_Manual.html` (also `Danual.html` symlink)
-- **Manifest**: `~/.hermes/skills/devops/living-manual/output/manifest.json`
+- **Manifest**: `~/.hermes/skills/devops/danual/output/manifest.json`
 
 ## Architecture
 

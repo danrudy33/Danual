@@ -11,8 +11,8 @@ import logging
 from pathlib import Path
 
 HERMES_HOME = Path.home() / ".hermes"
-SCRIPT = HERMES_HOME / "skills" / "devops" / "living-manual" / "scripts" / "update_manual.sh"
-MANIFEST = HERMES_HOME / "skills" / "devops" / "living-manual" / "output" / "manifest.json"
+SCRIPT = HERMES_HOME / "skills" / "devops" / "danual" / "scripts" / "update_manual.sh"
+MANIFEST = HERMES_HOME / "skills" / "devops" / "danual" / "output" / "manifest.json"
 
 log = logging.getLogger("danual-hook")
 
