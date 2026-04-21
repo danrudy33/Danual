@@ -118,6 +118,37 @@ header h1 span { color: var(--accent); }
 .recent-additions li a { color:var(--user-text); }
 .recent-additions-hidden { display:none; }
 
+/* ─── Audit Summary ─── */
+.audit-summary {
+  background: rgba(239,68,68,0.04); border:1px solid rgba(239,68,68,0.22);
+  border-radius:10px; padding:14px 18px; margin:0 0 20px;
+}
+.audit-summary h2 { color:#f87171; font-size:1rem; margin-bottom:8px; }
+.audit-summary ul { list-style:none; display:flex; flex-wrap:wrap; gap:6px 18px; margin-bottom:6px; }
+.audit-summary li { font-size:0.85rem; color:var(--text-muted); }
+.audit-summary li a { color:#f87171; }
+.audit-summary li.audit-ok a { color:#34d399; }
+.audit-summary li.audit-suspect a { color:#fbbf24; }
+.audit-summary .audit-note { font-size:0.78rem; color:var(--text-muted); margin-top:6px; }
+.audit-summary-hidden { display:none; }
+
+/* ─── Audit Badges ─── */
+.audit-badge {
+  font-size:0.6rem; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;
+  padding:1px 6px; border-radius:4px; flex-shrink:0; cursor:pointer; white-space:nowrap;
+  border:1px solid transparent;
+}
+.audit-badge.audit-likely_junk { background:rgba(239,68,68,0.14); color:#f87171; border-color:rgba(239,68,68,0.32); }
+.audit-badge.audit-suspect    { background:rgba(251,191,36,0.14); color:#fbbf24; border-color:rgba(251,191,36,0.32); }
+.audit-badge.audit-legitimate { background:rgba(52,211,153,0.12); color:#34d399; border-color:rgba(52,211,153,0.28); }
+.audit-badge.audit-exempt     { background:rgba(125,130,160,0.14); color:var(--text-muted); border-color:var(--border); }
+.audit-badge:hover { filter:brightness(1.15); }
+
+.audit-flags-list { margin:8px 0 0 0; padding-left:18px; }
+.audit-flags-list li { color:var(--text); font-size:0.86rem; margin:4px 0; line-height:1.5; }
+.audit-flags-list li strong { color:var(--accent); }
+.audit-modal-score { font-size:0.85rem; color:var(--text-muted); margin-bottom:10px; }
+
 /* ─── TOC ─── */
 .toc {
   background:var(--surface); border:1px solid var(--border);
@@ -361,6 +392,41 @@ document.addEventListener('DOMContentLoaded', () => {
     try { return JSON.parse(s); } catch (e) { return fallback; }
   }
 
+  const AUDIT_TITLES = {
+    likely_junk: '🔴 Likely Junk',
+    suspect: '🟡 Suspect',
+    legitimate: '🟢 Legitimate',
+    exempt: '⚪ Exempt (whitelisted)',
+  };
+  function openAuditModal(audit, skillName) {
+    const title = AUDIT_TITLES[audit.status] || audit.status;
+    let h = '<h3>' + esc(skillName) + '</h3>';
+    h += '<div class="audit-modal-score">' + esc(title) + ' &middot; Score: ' + (audit.score | 0) + '</div>';
+    if (audit.status === 'exempt') {
+      h += '<p>This skill is whitelisted via <code>do_not_audit: true</code> in its frontmatter.</p>';
+    } else if (!audit.flags || !audit.flags.length) {
+      h += '<p>No junk signals detected — this skill looks like a legitimate procedure.</p>';
+    } else {
+      h += '<div class="modal-section"><h4>Flags</h4><ul class="audit-flags-list">';
+      for (const f of audit.flags) {
+        h += '<li><strong>' + esc(f.type) + ':</strong> ' + esc(f.evidence || '') + '</li>';
+      }
+      h += '</ul></div>';
+    }
+    modal.innerHTML = '<button class="modal-close" aria-label="Close">&times;</button>' + h;
+    overlay.classList.add('active');
+    modal.querySelector('.modal-close').addEventListener('click', closeModal);
+  }
+
+  document.querySelectorAll('.audit-badge').forEach(badge => {
+    badge.addEventListener('click', e => {
+      e.stopPropagation();
+      const audit = safeParse(badge.dataset.audit, {});
+      const name = badge.dataset.itemName || '';
+      openAuditModal(audit, name);
+    });
+  });
+
   allItems.forEach(item => {
     item.addEventListener('click', () => {
       const data = safeParse(item.dataset.explainer, {});
@@ -368,6 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const desc = item.dataset.fullDesc || '';
       const badgesData = safeParse(item.dataset.badges, {});
       const metaData = safeParse(item.dataset.modalMeta, []);
+      const auditData = safeParse(item.dataset.audit, null);
       const badgesHtml = renderBadges(badgesData);
       const metaHtml = renderMeta(metaData);
       let h = '<h3>' + esc(name) + '</h3>';
@@ -381,6 +448,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (data.example_use_case) {
         h += '<div class="modal-section"><h4>Example</h4><p>' + esc(data.example_use_case) + '</p></div>';
+      }
+      if (auditData && auditData.status) {
+        const title = AUDIT_TITLES[auditData.status] || auditData.status;
+        h += '<div class="modal-section"><h4>Audit</h4>';
+        h += '<p>' + esc(title) + ' &middot; Score: ' + (auditData.score | 0) + '</p>';
+        if (auditData.flags && auditData.flags.length) {
+          h += '<ul class="audit-flags-list">';
+          for (const f of auditData.flags) {
+            h += '<li><strong>' + esc(f.type) + ':</strong> ' + esc(f.evidence || '') + '</li>';
+          }
+          h += '</ul>';
+        }
+        h += '</div>';
       }
       if (metaHtml) h += '<div class="modal-meta">' + metaHtml + '</div>';
       modal.innerHTML = '<button class="modal-close" aria-label="Close">&times;</button>' + h;
@@ -517,6 +597,30 @@ def _truncate(text, max_len=90):
     return text[:max_len].rsplit(" ", 1)[0] + "…"
 
 
+_AUDIT_LABELS = {
+    "likely_junk": ("🔴", "Likely Junk"),
+    "suspect": ("🟡", "Suspect"),
+    "legitimate": ("🟢", "Legitimate"),
+    "exempt": ("⚪", "Exempt"),
+}
+
+
+def _audit_badge_html(item):
+    """Render the audit badge for a user skill, or empty string if none."""
+    audit = item.get("audit")
+    if not audit or not audit.get("status"):
+        return ""
+    status = audit["status"]
+    label = _AUDIT_LABELS.get(status, ("", status.title()))[1]
+    audit_json = E(json.dumps(audit))
+    name = E(item.get("name", ""))
+    return (
+        f'<span class="audit-badge audit-{E(status)}" '
+        f'data-audit="{audit_json}" data-item-name="{name}" '
+        f'title="Click for audit details">{E(label)}</span>'
+    )
+
+
 def _render_item(item, name_field="name", show_desc=True, max_desc=90):
     name = item.get(name_field, "")
     desc = item.get("description", "")
@@ -535,11 +639,13 @@ def _render_item(item, name_field="name", show_desc=True, max_desc=90):
     search = E(_search_text(item))
     badges_json = E(json.dumps(_badges_data(item)))
     meta_json = E(json.dumps(_modal_meta_fields(item)))
+    audit = item.get("audit")
+    audit_attr = f' data-audit="{E(json.dumps(audit))}"' if audit else ""
 
     h = f'<div class="{_item_classes(item)}" data-search="{search}" '
     h += f'data-explainer="{exp_json}" data-item-name="{E(name)}" '
     h += f'data-full-desc="{E(full_desc)}" data-badges="{badges_json}" '
-    h += f'data-modal-meta="{meta_json}">'
+    h += f'data-modal-meta="{meta_json}"{audit_attr}>'
     h += '<div class="item-header">'
     h += f'<span class="item-name">{marker}{E(name)}</span>'
     h += _source_tag(item.get("source", "hermes"))
@@ -547,6 +653,7 @@ def _render_item(item, name_field="name", show_desc=True, max_desc=90):
         h += '<span class="item-new-badge">✨ NEW</span>'
     elif item.get("recently_added"):
         h += '<span class="item-recent-badge">🆕 Recently Added</span>'
+    h += _audit_badge_html(item)
     h += '<span class="item-info">ℹ</span>'
     h += '</div>'
     if short_desc:
@@ -585,6 +692,45 @@ def _render_whats_new(manifest):
         h += f'<li><a href="#{anchor}">{count} new {label}</a></li>'
     h += '</ul></div>'
     return h
+
+
+def _render_audit_summary(manifest):
+    """Audit summary lists junk/suspect/legitimate/exempt counts and links to user skills."""
+    user_skills = manifest.get("user_guide", {}).get("skills", {}).get("user_created", [])
+    if not user_skills:
+        return '<div class="audit-summary audit-summary-hidden"></div>'
+
+    counts = {"likely_junk": 0, "suspect": 0, "legitimate": 0, "exempt": 0}
+    for s in user_skills:
+        status = (s.get("audit") or {}).get("status")
+        if status in counts:
+            counts[status] += 1
+    if not any(counts.values()):
+        return '<div class="audit-summary audit-summary-hidden"></div>'
+
+    h = '<div class="audit-summary">'
+    h += '<h2>🔍 Skill Audit</h2>'
+    h += '<ul>'
+    if counts["likely_junk"]:
+        h += f'<li><a href="#skills-user">🔴 {counts["likely_junk"]} likely junk</a></li>'
+    if counts["suspect"]:
+        h += f'<li class="audit-suspect"><a href="#skills-user">🟡 {counts["suspect"]} suspect</a></li>'
+    if counts["legitimate"]:
+        h += f'<li class="audit-ok"><a href="#skills-user">🟢 {counts["legitimate"]} legitimate</a></li>'
+    if counts["exempt"]:
+        h += f'<li>⚪ {counts["exempt"]} exempt (whitelisted)</li>'
+    h += '</ul>'
+    if counts["likely_junk"] or counts["suspect"]:
+        h += '<p class="audit-note">Click a badge on any user skill to see why it was flagged. A future quarantine tool can move junk skills without deleting them.</p>'
+    h += '</div>'
+    return h
+
+
+def _audit_sort_key(skill):
+    """Sort order for user skills: likely_junk → suspect → legitimate → exempt → unaudited."""
+    order = {"likely_junk": 0, "suspect": 1, "legitimate": 2, "exempt": 3}
+    status = (skill.get("audit") or {}).get("status")
+    return (order.get(status, 4), -(skill.get("audit") or {}).get("score", 0), skill.get("name", ""))
 
 
 def _render_recent_additions(manifest):
@@ -691,6 +837,7 @@ def render(manifest):
     # What's New
     parts.append(_render_whats_new(manifest))
     parts.append(_render_recent_additions(manifest))
+    parts.append(_render_audit_summary(manifest))
 
     # TOC
     parts.append('<nav class="toc" id="toc"><h2>Contents</h2>')
@@ -756,7 +903,8 @@ def render(manifest):
     if skills_user:
         parts.append(f'<div class="subsection-title" id="skills-user">Your Skills ({len(skills_user)})</div>')
         parts.append('<div class="items-grid">')
-        for s in skills_user:
+        # Show flagged skills first so users see problems before scanning.
+        for s in sorted(skills_user, key=_audit_sort_key):
             parts.append(_render_item(s, max_desc=60))
         parts.append('</div>')
     parts.append('</div>')
