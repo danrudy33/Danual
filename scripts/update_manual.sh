@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # The Danual — Update Manual (Phase 5 Wrapper)
-# Orchestrates: scanner → differ → enricher → renderer → notification
+# Orchestrates: scanner → differ → enricher → auditor → renderer → notification
 #
 # Usage:
 #   ./update_manual.sh              # Full pipeline
@@ -87,6 +87,11 @@ if ! $NO_ENRICH; then
     echo "▸ Phase 3: Enriching with descriptions..."
     "$OTHER_PYTHON" "$SCRIPT_DIR/enrich_manifest.py"
 fi
+
+# Step 3.5: Auditor — flags suspicious user-created skills
+echo ""
+echo "▸ Phase 3.5: Auditing user skills..."
+"$OTHER_PYTHON" "$SCRIPT_DIR/audit_skills.py"
 
 # Step 4: Renderer
 echo ""
