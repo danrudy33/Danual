@@ -203,6 +203,20 @@ def _count_date_in_code(body: str) -> int:
     return count
 
 
+def _strip_fenced_code(body: str) -> str:
+    """Remove fenced code blocks. Pattern matches inside ```…``` false-fire on
+    schema examples like `verdict:` field names in frontmatter templates."""
+    out = []
+    in_fence = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
+
+
 # ─── Auditor ──────────────────────────────────────────────────────────────────
 
 def audit_skill_file(skill_md: Path):
@@ -218,27 +232,33 @@ def audit_skill_file(skill_md: Path):
     flags = []
     score = 0
 
+    # Prose-only view excludes fenced code so schema templates (`verdict:` field
+    # names, example frontmatter with `today's date` placeholders, etc.) don't
+    # false-trigger narrative or date patterns.
+    prose = _strip_fenced_code(body)
+
     # 1. Narrative phrases (25) — single fire; pick first for evidence
-    if any(p.search(body) for p in NARRATIVE_PATTERNS):
+    if any(p.search(prose) for p in NARRATIVE_PATTERNS):
         score += 25
-        snippet = _first_snippet(NARRATIVE_PATTERNS, body) or "diary-like language"
+        snippet = _first_snippet(NARRATIVE_PATTERNS, prose) or "diary-like language"
         flags.append({"type": "narrative_phrase", "evidence": snippet})
 
-    # 2. Dated facts (20 if ≥3, 10 if 1-2) — excludes frontmatter, body only
-    dated_count = _count(DATED_PATTERNS, body)
+    # 2. Dated facts (20 if ≥3, 10 if 1-2) — prose only; filename templates
+    # like `2026-04-18-x-neo.md` inside code blocks shouldn't punish a skill.
+    dated_count = _count(DATED_PATTERNS, prose)
     if dated_count >= 3:
         score += 20
         flags.append({
             "type": "dated_fact",
             "evidence": f"{dated_count} date/time references in body " +
-                        (f'(e.g., "{_first_snippet(DATED_PATTERNS, body, 30)}")' if dated_count else ""),
+                        f'(e.g., "{_first_snippet(DATED_PATTERNS, prose, 30)}")',
         })
     elif dated_count > 0:
         score += 10
         flags.append({
             "type": "dated_fact",
             "evidence": f"{dated_count} date/time reference(s) in body " +
-                        f'(e.g., "{_first_snippet(DATED_PATTERNS, body, 30)}")',
+                        f'(e.g., "{_first_snippet(DATED_PATTERNS, prose, 30)}")',
         })
 
     # 2b. Dates embedded in commands (+15) — skill is date-locked
@@ -299,12 +319,21 @@ def audit_skill_file(skill_md: Path):
             "evidence": f"{static_count} specific numeric facts (counts, $, percentages)",
         })
 
-    # 9. Narrative headings (15)
-    if any(p.search(body) for p in NARRATIVE_HEADING_PATTERNS):
+    # 9. Narrative headings (15 for 1, 25 for ≥2) — two-or-more descriptive
+    # headings (Problem + Symptoms, Context + The Fix, …) is a strong tell
+    # that the skill is a troubleshooting diary rather than a procedure.
+    narr_head_count = _count(NARRATIVE_HEADING_PATTERNS, body)
+    if narr_head_count >= 2:
+        score += 25
+        flags.append({
+            "type": "narrative_headings",
+            "evidence": f"{narr_head_count} descriptive headings (Problem/Symptoms/The X/…)",
+        })
+    elif narr_head_count == 1:
         score += 15
         flags.append({
             "type": "narrative_headings",
-            "evidence": _first_snippet(NARRATIVE_HEADING_PATTERNS, body, 30) or "descriptive headings",
+            "evidence": _first_snippet(NARRATIVE_HEADING_PATTERNS, body, 30) or "descriptive heading",
         })
 
     # 10. Comparison tables (10) — ≥3 rows to rule out a single decoration
@@ -316,7 +345,21 @@ def audit_skill_file(skill_md: Path):
             "evidence": f"{table_rows} comparison-table rows (informational, not procedural)",
         })
 
-    score = min(score, 100)
+    # Structure bonus — a substantial body with clear workflow + trigger + code
+    # is almost certainly a legitimate procedure, even if a few narrative
+    # signals fired (e.g., a "tested April 2026" aside in a long runbook).
+    # Only applied to skills that aren't already heavily flagged: a date-locked
+    # grep recipe will have full structure too, but the signals dominate.
+    if (
+        score < LIKELY_JUNK
+        and _has_workflow(body)
+        and _has_trigger(body)
+        and _has_code(body)
+        and len(body) > 2000
+    ):
+        score -= 20
+
+    score = max(0, min(score, 100))
     if score >= LIKELY_JUNK:
         status = "likely_junk"
     elif score >= SUSPECT:
