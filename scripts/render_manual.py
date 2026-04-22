@@ -149,6 +149,51 @@ header h1 span { color: var(--accent); }
 .audit-flags-list li strong { color:var(--accent); }
 .audit-modal-score { font-size:0.85rem; color:var(--text-muted); margin-bottom:10px; }
 
+/* ─── Junk Diagnosis Banner (modal) ─── */
+.junk-banner {
+  border-radius:10px; padding:14px 16px; margin:10px 0 16px;
+  border:1px solid; line-height:1.55;
+}
+.junk-banner.junk-likely_junk {
+  background:rgba(239,68,68,0.09); border-color:rgba(239,68,68,0.32); color:#fecaca;
+}
+.junk-banner.junk-suspect {
+  background:rgba(251,191,36,0.08); border-color:rgba(251,191,36,0.32); color:#fde68a;
+}
+.junk-banner .junk-title {
+  font-size:0.95rem; font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:6px;
+}
+.junk-banner .junk-score {
+  font-size:0.72rem; font-weight:600; opacity:0.7; margin-left:auto;
+  letter-spacing:0.4px;
+}
+.junk-banner .junk-verdict { font-size:0.88rem; margin-bottom:10px; }
+.junk-banner .junk-reasons-title {
+  font-size:0.7rem; text-transform:uppercase; letter-spacing:0.8px;
+  opacity:0.75; margin:8px 0 4px;
+}
+.junk-banner ul.junk-reasons { list-style:none; padding:0; margin:0; }
+.junk-banner ul.junk-reasons li {
+  font-size:0.84rem; padding:4px 0 4px 18px; position:relative; line-height:1.5;
+}
+.junk-banner ul.junk-reasons li::before {
+  content:"✗"; position:absolute; left:0; top:4px; font-weight:700; opacity:0.7;
+}
+.junk-banner .junk-action {
+  margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);
+  font-size:0.82rem;
+}
+.junk-banner .junk-action code {
+  display:block; background:rgba(0,0,0,0.35); padding:6px 10px; border-radius:6px;
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.8rem;
+  margin-top:6px; color:#e2e4ed; overflow-x:auto; white-space:nowrap;
+}
+.modal-suppressed-note {
+  font-size:0.78rem; color:var(--text-muted); font-style:italic;
+  padding:8px 12px; background:var(--surface2); border-radius:6px;
+  margin-bottom:12px;
+}
+
 /* ─── TOC ─── */
 .toc {
   background:var(--surface); border:1px solid var(--border);
@@ -398,20 +443,86 @@ document.addEventListener('DOMContentLoaded', () => {
     legitimate: '🟢 Legitimate',
     exempt: '⚪ Exempt (whitelisted)',
   };
+
+  // Plain-English translations for audit flag codes + the evidence the auditor
+  // recorded. These are what the user actually reads in the diagnosis banner —
+  // not the machine codes ("no_workflow_structure") or raw regex snippets.
+  const FLAG_EXPLANATIONS = {
+    narrative_phrase:        "Written like a diary entry ('we found', 'turns out', 'today'), not a reusable procedure.",
+    dated_fact:              "Contains specific dates or times — this skill is locked to one moment rather than being evergreen.",
+    dated_fact_in_commands:  "Dates are hard-coded inside shell commands — the commands will go stale.",
+    no_workflow_structure:   "No numbered steps, no Workflow/Usage/Steps section — this isn't a procedure, it's prose.",
+    no_commands:             "No code blocks, file paths, or commands — there's nothing here to actually run.",
+    no_trigger_conditions:   "No 'When to use' section — there's no clear signal for when this skill should activate.",
+    opinion_summary:         "Contains verdict/opinion language ('key finding', 'my take', 'bottom line') — this is an observation, not instructions.",
+    short_body:              "Too short to be a real procedure (under 500 chars).",
+    static_observations:     "Contains specific numbers (counts, dollar amounts, percentages) that are frozen snapshots of one moment.",
+    narrative_headings:      "Uses descriptive headings like 'Problem', 'Symptoms', 'The Fix', 'Key Finding' — this is a troubleshooting writeup, not a playbook.",
+    comparison_table:        "Structured as a comparison table — informational content, not actionable steps.",
+  };
+
+  const JUNK_VERDICTS = {
+    likely_junk: "This looks like a session narrative that got saved as a skill — a one-time troubleshooting note, not a reusable procedure. Reading it won't help Hermes do anything next time; it'll just pollute context.",
+    suspect:     "This has mixed signals. It might be a real procedure with some narrative quirks, or it might be a dressed-up session note. Open the SKILL.md and judge for yourself before trusting it.",
+  };
+
+  function explainFlag(flag) {
+    // Prefer the plain-English explanation; fall back to the raw evidence
+    // so we never hide information the auditor surfaced.
+    const plain = FLAG_EXPLANATIONS[flag.type];
+    if (plain) return plain;
+    return (flag.evidence || flag.type || '').toString();
+  }
+
+  function renderJunkBanner(audit, skillName) {
+    if (!audit || (audit.status !== 'likely_junk' && audit.status !== 'suspect')) return '';
+    const title = AUDIT_TITLES[audit.status] || audit.status;
+    const verdict = JUNK_VERDICTS[audit.status] || '';
+    const flags = audit.flags || [];
+    let h = '<div class="junk-banner junk-' + esc(audit.status) + '">';
+    h += '<div class="junk-title">' + esc(title);
+    h += '<span class="junk-score">Score ' + (audit.score | 0) + '/100</span></div>';
+    if (verdict) h += '<div class="junk-verdict">' + esc(verdict) + '</div>';
+    if (flags.length) {
+      h += '<div class="junk-reasons-title">Why it was flagged</div>';
+      h += '<ul class="junk-reasons">';
+      for (const f of flags) {
+        h += '<li>' + esc(explainFlag(f)) + '</li>';
+      }
+      h += '</ul>';
+    }
+    if (audit.status === 'likely_junk') {
+      // Give the user an exact command they can run to nuke it.
+      const safeName = (skillName || '').replace(/[^a-zA-Z0-9._-]/g, '');
+      h += '<div class="junk-action">';
+      h += 'If you agree this is junk, find and delete it:';
+      h += '<code>find ~/.hermes/skills -type d -name ' + esc(safeName) + ' -exec rm -rf {} +</code>';
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
   function openAuditModal(audit, skillName) {
     const title = AUDIT_TITLES[audit.status] || audit.status;
     let h = '<h3>' + esc(skillName) + '</h3>';
-    h += '<div class="audit-modal-score">' + esc(title) + ' &middot; Score: ' + (audit.score | 0) + '</div>';
-    if (audit.status === 'exempt') {
-      h += '<p>This skill is whitelisted via <code>do_not_audit: true</code> in its frontmatter.</p>';
-    } else if (!audit.flags || !audit.flags.length) {
-      h += '<p>No junk signals detected — this skill looks like a legitimate procedure.</p>';
+    // For flagged skills, show the plain-English diagnosis banner as the
+    // whole body — clicking a 🔴/🟡 badge should explain why, period.
+    if (audit.status === 'likely_junk' || audit.status === 'suspect') {
+      h += renderJunkBanner(audit, skillName);
     } else {
-      h += '<div class="modal-section"><h4>Flags</h4><ul class="audit-flags-list">';
-      for (const f of audit.flags) {
-        h += '<li><strong>' + esc(f.type) + ':</strong> ' + esc(f.evidence || '') + '</li>';
+      h += '<div class="audit-modal-score">' + esc(title) + ' &middot; Score: ' + (audit.score | 0) + '</div>';
+      if (audit.status === 'exempt') {
+        h += '<p>This skill is whitelisted via <code>do_not_audit: true</code> in its frontmatter.</p>';
+      } else if (!audit.flags || !audit.flags.length) {
+        h += '<p>No junk signals detected — this skill looks like a legitimate procedure.</p>';
+      } else {
+        h += '<div class="modal-section"><h4>Minor signals (did not trip the threshold)</h4><ul class="audit-flags-list">';
+        for (const f of audit.flags) {
+          h += '<li>' + esc(explainFlag(f)) + '</li>';
+        }
+        h += '</ul></div>';
       }
-      h += '</ul></div>';
     }
     modal.innerHTML = '<button class="modal-close" aria-label="Close">&times;</button>' + h;
     overlay.classList.add('active');
@@ -437,31 +548,50 @@ document.addEventListener('DOMContentLoaded', () => {
       const auditData = safeParse(item.dataset.audit, null);
       const badgesHtml = renderBadges(badgesData);
       const metaHtml = renderMeta(metaData);
+      const isFlagged = auditData && (auditData.status === 'likely_junk' || auditData.status === 'suspect');
+
       let h = '<h3>' + esc(name) + '</h3>';
       if (badgesHtml) h += '<div class="modal-badges">' + badgesHtml + '</div>';
-      if (desc) h += '<div class="modal-desc">' + esc(desc) + '</div>';
-      if (data.what_it_does) {
-        h += '<div class="modal-section"><h4>What it does</h4><p>' + esc(data.what_it_does) + '</p></div>';
-      }
-      if (data.why_it_matters) {
-        h += '<div class="modal-section"><h4>Why it matters</h4><p>' + esc(data.why_it_matters) + '</p></div>';
-      }
-      if (data.example_use_case) {
-        h += '<div class="modal-section"><h4>Example</h4><p>' + esc(data.example_use_case) + '</p></div>';
-      }
-      if (auditData && auditData.status) {
-        const title = AUDIT_TITLES[auditData.status] || auditData.status;
-        h += '<div class="modal-section"><h4>Audit</h4>';
-        h += '<p>' + esc(title) + ' &middot; Score: ' + (auditData.score | 0) + '</p>';
-        if (auditData.flags && auditData.flags.length) {
-          h += '<ul class="audit-flags-list">';
-          for (const f of auditData.flags) {
-            h += '<li><strong>' + esc(f.type) + ':</strong> ' + esc(f.evidence || '') + '</li>';
-          }
-          h += '</ul>';
+
+      if (isFlagged) {
+        // Lead with the diagnosis — the whole point of clicking a flagged
+        // skill is to decide whether to delete it, not to read AI-generated
+        // "what it does" fluff that dresses up garbage as legit.
+        h += renderJunkBanner(auditData, name);
+        // Show the raw description (from the skill's own frontmatter) but
+        // suppress the enricher's misleading what_it_does/why_it_matters/example
+        // blocks. Those are AI-generated polish that makes junk look real.
+        if (desc) {
+          h += '<div class="modal-section"><h4>Description (from the skill itself)</h4>';
+          h += '<p style="color:var(--text-muted);font-size:0.85rem">' + esc(desc) + '</p></div>';
         }
-        h += '</div>';
+        h += '<div class="modal-suppressed-note">The auto-generated \"What it does / Why it matters / Example\" section is hidden for flagged skills — it tends to make low-quality skills look legitimate.</div>';
+      } else {
+        if (desc) h += '<div class="modal-desc">' + esc(desc) + '</div>';
+        if (data.what_it_does) {
+          h += '<div class="modal-section"><h4>What it does</h4><p>' + esc(data.what_it_does) + '</p></div>';
+        }
+        if (data.why_it_matters) {
+          h += '<div class="modal-section"><h4>Why it matters</h4><p>' + esc(data.why_it_matters) + '</p></div>';
+        }
+        if (data.example_use_case) {
+          h += '<div class="modal-section"><h4>Example</h4><p>' + esc(data.example_use_case) + '</p></div>';
+        }
+        if (auditData && auditData.status) {
+          const title = AUDIT_TITLES[auditData.status] || auditData.status;
+          h += '<div class="modal-section"><h4>Audit</h4>';
+          h += '<p>' + esc(title) + ' &middot; Score: ' + (auditData.score | 0) + '</p>';
+          if (auditData.flags && auditData.flags.length) {
+            h += '<ul class="audit-flags-list">';
+            for (const f of auditData.flags) {
+              h += '<li>' + esc(explainFlag(f)) + '</li>';
+            }
+            h += '</ul>';
+          }
+          h += '</div>';
+        }
       }
+
       if (metaHtml) h += '<div class="modal-meta">' + metaHtml + '</div>';
       modal.innerHTML = '<button class="modal-close" aria-label="Close">&times;</button>' + h;
       overlay.classList.add('active');
