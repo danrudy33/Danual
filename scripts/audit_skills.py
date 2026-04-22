@@ -58,7 +58,6 @@ NARRATIVE_PATTERNS = [
     re.compile(r"\blast (week|night|month)\b", re.IGNORECASE),
     re.compile(r"\bwhen we (ran|checked|looked|tried)\b", re.IGNORECASE),
     re.compile(r"\b(verdict)s?\s*(for|:)", re.IGNORECASE),
-    re.compile(r"\*\*Verdict\b", re.IGNORECASE),
     re.compile(r"^\*\*The fix:?\*\*", re.MULTILINE | re.IGNORECASE),
 ]
 
@@ -114,7 +113,9 @@ CODE_PATTERNS = [
 def _has_workflow(body: str) -> bool:
     """True if the skill body looks procedural (steps, numbered sections, usage)."""
     if re.search(
-        r"^#{2,3}\s*(Workflow|Usage|Steps?|How to|How it works|Procedure|Process|Practical discovery steps|Verification steps|Core workflow)\b",
+        r"^#{2,3}\s*(Workflow|Usage|Steps?|How to|How it works|Procedure|Process|"
+        r"Practical discovery steps|Verification steps|Core workflow|"
+        r"Rollback|Verification|Mitigation|Configuration|Setup|Installation)\b",
         body, re.MULTILINE | re.IGNORECASE,
     ):
         return True
@@ -124,6 +125,12 @@ def _has_workflow(body: str) -> bool:
         return True
     if len(re.findall(r"^\s*\d+\.\s+\S", body, re.MULTILINE)) >= 3:
         return True
+    # Multi-section skill with shell commands reads as a runbook even when
+    # none of its H2s match the operational-keyword list above.
+    h2_h3_count = len(re.findall(r"^#{2,3}\s+\S", body, re.MULTILINE))
+    has_shell_code = bool(re.search(r"```(?:bash|shell|sh|zsh)\n", body))
+    if h2_h3_count >= 4 and has_shell_code:
+        return True
     return False
 
 
@@ -131,11 +138,17 @@ def _has_trigger(body: str) -> bool:
     """True if the skill body declares when it should activate."""
     for pattern in (
         r"^#{2,3}\s*When (?:to use this|this skill|this is|you should|I should)",
+        r"^#{2,3}\s*When\b",
         r"^#{2,3}\s*Usage\b",
+        r"^#{2,3}\s*Trigger\b",
         r"^#{2,3}\s*What this skill is for\b",
-        r"\bUse this (when|for|to)\b",
+        r"\bUse (this|when) (when|for|to)\b",
         r"\bgood fit (for|when)\b",
         r"\b(activate|invoke|trigger) this skill when\b",
+        # Opening-paragraph triggers — skills that start with "When switching…",
+        # "Use this when…" as a leading sentence rather than a named section.
+        r"^When (switching|configuring|setting up|running|debugging|troubleshooting|investigating)",
+        r"^Use this (skill )?(when|for|to)\b",
     ):
         if re.search(pattern, body, re.MULTILINE | re.IGNORECASE):
             return True
@@ -336,13 +349,17 @@ def audit_skill_file(skill_md: Path):
             "evidence": _first_snippet(NARRATIVE_HEADING_PATTERNS, body, 30) or "descriptive heading",
         })
 
-    # 10. Comparison tables (10) — ≥3 rows to rule out a single decoration
+    # 10. Comparison tables (10) — fires only when tables DOMINATE the body.
+    # A small reference table (e.g. a 4-row "What's included" summary) isn't
+    # evidence the skill is informational-only; a skill that's 25%+ tables is.
     table_rows = _count(COMPARISON_TABLE_PATTERNS, body)
-    if table_rows >= 3:
+    body_lines = max(1, len(body.splitlines()))
+    table_ratio = table_rows / body_lines
+    if table_rows >= 8 or table_ratio >= 0.25:
         score += 10
         flags.append({
             "type": "comparison_table",
-            "evidence": f"{table_rows} comparison-table rows (informational, not procedural)",
+            "evidence": f"{table_rows} comparison-table rows ({int(table_ratio*100)}% of body)",
         })
 
     # Structure bonus — a substantial body with clear workflow + trigger + code
@@ -350,14 +367,24 @@ def audit_skill_file(skill_md: Path):
     # signals fired (e.g., a "tested April 2026" aside in a long runbook).
     # Only applied to skills that aren't already heavily flagged: a date-locked
     # grep recipe will have full structure too, but the signals dominate.
-    if (
-        score < LIKELY_JUNK
-        and _has_workflow(body)
+    # 1200-char floor catches tight well-structured skills that 2000 missed.
+    has_full_structure = (
+        _has_workflow(body)
         and _has_trigger(body)
         and _has_code(body)
-        and len(body) > 2000
-    ):
+        and len(body) > 1200
+    )
+    if score < LIKELY_JUNK and has_full_structure:
         score -= 20
+
+    # Deep-clean bonus — stacks with the above. When every quality marker is
+    # present AND no hardcoded-date lock fired, the skill is almost certainly
+    # a genuine runbook. dated_fact_in_commands remains a hard fail signal and
+    # blocks this bonus entirely.
+    if has_full_structure and not any(
+        f["type"] == "dated_fact_in_commands" for f in flags
+    ):
+        score -= 15
 
     score = max(0, min(score, 100))
     if score >= LIKELY_JUNK:
