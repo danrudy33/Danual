@@ -1,10 +1,10 @@
 ---
 name: danual
-description: "The Danual — auto-generate a living, version-aware HTML manual for your Hermes instance. Scans tools, commands, CLI subcommands, skills, integrations, MCP servers, cron jobs, config, and env vars. Highlights new features per release (green) and recent user additions (blue, 30-day). Self-contained HTML with search, clickable explainers, and color-coded entries. Auto-rebuilds via gateway hook and nightly cron."
-version: 2.0.0
+description: "The Danual — auto-generate a living, version-aware HTML manual for your Hermes instance. Scans tools, commands, CLI subcommands, skills, integrations, MCP servers, cron jobs, config, and env vars. Highlights new features per release (green) and recent user additions (blue, 30-day). Audits user-created skills for narrative/diary patterns and flags likely junk. Self-contained HTML with search, clickable explainers, and color-coded entries. Auto-rebuilds via gateway hook and nightly cron."
+version: 3.0.0
 metadata:
   hermes:
-    tags: [documentation, devops, manual, tools]
+    tags: [documentation, devops, manual, tools, audit]
 ---
 
 # The Danual — Dan's Dynamic-Manual for Hermes
@@ -26,6 +26,13 @@ A self-updating, browser-based HTML manual that regenerates after every Hermes u
 - **Release history**: Full release notes with clickable scrollable modals
 - **Auto-rebuild**: Gateway startup hook (post-update) + nightly cron (local additions)
 - **Enrichment caching**: `--no-enrich` preserves previously generated explainers
+- **Skill audit** (v3.0.0): Flags user-created skills that look like narrative troubleshooting notes instead of reusable procedures
+  - 🔴 **Likely Junk** (score ≥ 60): dated facts, narrative headings, no workflow/trigger structure
+  - 🟡 **Suspect** (score 30–59): mixed signals — review before relying
+  - 🟢 **Legitimate** (score < 30): workflow + trigger + commands present
+  - ⚪ **Exempt**: add `do_not_audit: true` to a skill's frontmatter to whitelist it
+  - Detection only — never mutates user skills. Writes `output/skill_audit.json` for a future quarantine tool.
+  - Click any badge in the manual to see the specific flags that fired.
 
 ## Usage
 
@@ -58,6 +65,7 @@ update_manual.sh (wrapper)
     ├── regenerate_manual.py  ← Scanner: extracts all data → manifest.json
     ├── diff_manifest.py      ← Differ: version diff + local additions + cascade
     ├── enrich_manifest.py    ← Enricher: section intros + explainers
+    ├── audit_skills.py       ← Auditor: heuristic junk detection on user skills
     └── render_manual.py      ← Renderer: self-contained HTML
 
 hooks/danual-rebuild/        ← Gateway startup hook (post-update trigger)
@@ -71,9 +79,11 @@ scripts/
 ├── regenerate_manual.py   # Scanner (requires Hermes venv Python 3.11)
 ├── diff_manifest.py       # Differ (version + local + cascade + recently_added)
 ├── enrich_manifest.py     # Enricher (platforms, config, CLI, tools, skills)
-├── render_manual.py       # HTML Renderer (dark theme, modals, dual badges)
+├── audit_skills.py        # Auditor (narrative/diary heuristics on user skills)
+├── render_manual.py       # HTML Renderer (dark theme, modals, dual badges, audit UI)
 └── update_manual.sh       # Orchestrator wrapper
 output/
-├── manifest.json          # Current manifest
-└── .manifest_snapshot.json # Previous manifest (diff baseline)
+├── manifest.json            # Current manifest (includes per-skill audit field)
+├── skill_audit.json         # Standalone audit — consumed by quarantine tooling
+└── .manifest_snapshot.json  # Previous manifest (diff baseline)
 ```
