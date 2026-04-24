@@ -1,7 +1,7 @@
 ---
 name: danual
 description: "The Danual — auto-generate a living, version-aware HTML manual for your Hermes instance. Scans tools, commands, CLI subcommands, skills, integrations, MCP servers, cron jobs, config, and env vars. Highlights new features per release (green) and recent user additions (blue, 30-day). Audits user-created skills for narrative/diary patterns and flags likely junk. Self-contained HTML with search, clickable explainers, and color-coded entries. Auto-rebuilds via gateway hook and nightly cron."
-version: 3.0.0
+version: 3.1.0
 metadata:
   hermes:
     tags: [documentation, devops, manual, tools, audit]
@@ -26,7 +26,7 @@ A self-updating, browser-based HTML manual that regenerates after every Hermes u
 - **Release history**: Full release notes with clickable scrollable modals
 - **Auto-rebuild**: Gateway startup hook (post-update) + nightly cron (local additions)
 - **Enrichment caching**: `--no-enrich` preserves previously generated explainers
-- **Skill audit** (v3.0.0): Flags user-created skills that look like narrative troubleshooting notes instead of reusable procedures
+- **Skill audit** (v3.1.0): Flags user-created skills that look like narrative troubleshooting notes instead of reusable procedures
   - 🔴 **Likely Junk** (score ≥ 60): dated facts, narrative headings, no workflow/trigger structure
   - 🟡 **Suspect** (score 30–59): mixed signals — review before relying
   - 🟢 **Legitimate** (score < 30): workflow + trigger + commands present

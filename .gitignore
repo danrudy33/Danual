@@ -1,5 +1,6 @@
 output/manifest.json
 output/.manifest_snapshot.json
+output/skill_audit.json
 references/
 templates/
 __pycache__/
