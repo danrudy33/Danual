@@ -7,10 +7,9 @@
 ## What’s new in v3.1.0
     
     - Added skill audit for narrative/junk skill detection.
-    - Shows clear verdicts and explanations in Danual.
+    - Shows clear verdicts and explanations.
     - Supports do_not_audit: true exemptions.
-    - Writes output/skill_audit.json for review.
-    - Detection-only: no automatic deletion or mutation.
+    - Full release notes below.
 
 ---
 
@@ -219,7 +218,20 @@ Yes. The shell alias installer detects `xdg-open` vs `open`, and all file paths 
 Open an issue or PR. The scanner has hardcoded paths for Hermes internals — future Hermes refactors may need PRs to update scanner selectors.
 
 ---
+## v3.1.0 release notes
+    
+    - Added a Danual skill-audit pass that flags user-created skills that look like narrative notes, diary entries, or one-off troubleshooting dumps instead of reusable procedures.
+    - Added clear audit verdicts:
+      - Legitimate
+      - Suspect
+      - Likely Junk
+      - Exempt
+    - Flagged skills now show plain-English reasons in the manual so bad skills are obvious instead of disguised as useful docs.
+    - Audit is detection-only; it does not delete or rewrite skills automatically.
+    - Added do_not_audit: true support for intentional exceptions.
+    - Writes audit output to output/skill_audit.json for review and future cleanup workflows.
 
+---
 ## Known limitations
 
 Being upfront about what hasn't been exhaustively tested:
