@@ -4,7 +4,7 @@
 
 ![The Danual — main view](docs/screenshots/hero.png)
 
-What’s new in v3.1.0
+## What’s new in v3.1.0
     
     - Added skill audit for narrative/junk skill detection.
     - Shows clear verdicts and explanations in Danual.
